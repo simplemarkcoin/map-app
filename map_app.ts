@@ -121,6 +121,8 @@ export class MapApp extends LitElement {
   @state() messages: HTMLElement[] = [];
   @state() mapInitialized = false;
   @state() mapError = '';
+  @state() currentLocation: {lat: number; lng: number} | null = null;
+  @state() isStreetViewVisible = false;
 
   // Google Maps: Instance of the Google Maps 3D map.
   private map?: any;
@@ -136,6 +138,8 @@ export class MapApp extends LitElement {
 
   // Google Maps: Instance of the Google Maps Directions service.
   private directionsService?: any;
+  // Google Maps: Instance of the Street View service.
+  private streetViewService?: any;
   // Google Maps: Instance of the current route polyline.
   private routePolyline?: any;
   // Google Maps: Markers for origin and destination of a route.
@@ -214,6 +218,10 @@ You can find this constant near the top of the map_app.ts file.`;
         this.directionsService = new (
           window as any
         ).google.maps.DirectionsService();
+        // Google Maps: Initialize the StreetViewService.
+        this.streetViewService = new (
+          window as any
+        ).google.maps.StreetViewService();
       } else {
         console.error('DirectionsService not loaded.');
       }
@@ -276,6 +284,7 @@ You can find this constant near the top of the map_app.ts file.`;
       this.destinationMarker.remove();
       this.destinationMarker = undefined;
     }
+    this.currentLocation = null;
   }
 
   /**
@@ -310,6 +319,7 @@ You can find this constant near the top of the map_app.ts file.`;
       async (results: any, status: string) => {
         if (status === 'OK' && results && results[0] && this.map) {
           const location = results[0].geometry.location;
+          this.currentLocation = {lat: location.lat(), lng: location.lng()};
 
           // Google Maps: Define camera options and fly to the location.
           const cameraOptions = {
@@ -337,6 +347,7 @@ You can find this constant near the top of the map_app.ts file.`;
           this.marker.label = label;
           (this.map as any).appendChild(this.marker);
         } else {
+          this.currentLocation = null;
           console.error(
             `Geocode was not successful for "${locationQuery}". Reason: ${status}`,
           );
@@ -631,6 +642,41 @@ You can find this constant near the top of the map_app.ts file.`;
     }
   }
 
+  private async _showStreetView() {
+    if (!this.currentLocation || !this.streetViewService) return;
+
+    this.streetViewService.getPanorama(
+      {location: this.currentLocation, radius: 50},
+      async (data: any, status: string) => {
+        if (status === 'OK') {
+          this.isStreetViewVisible = true;
+          this.updateComplete.then(() => {
+            const panoramaElement = this.querySelector('#street-view-panorama');
+            if (panoramaElement) {
+              const panorama = new (
+                window as any
+              ).google.maps.StreetViewPanorama(panoramaElement, {
+                position: data.location.latLng,
+                pov: {heading: 34, pitch: 10},
+                visible: true,
+              });
+            }
+          });
+        } else {
+          console.error('Street View not available:', status);
+          const {textElement} = this.addMessage('assistant', '');
+          textElement.innerHTML = await marked.parse(
+            'I looked, but Street View is not available for this specific location.',
+          );
+        }
+      },
+    );
+  }
+
+  private _hideStreetView() {
+    this.isStreetViewVisible = false;
+  }
+
   render() {
     // Google Maps: Initial camera parameters for the <gmp-map-3d> element.
     const initialCenter = '0,0,100'; // lat,lng,altitude
@@ -665,6 +711,23 @@ You can find this constant near the top of the map_app.ts file.`;
           default-ui-disabled="true"
           role="application">
         </gmp-map-3d>
+        ${this.currentLocation
+          ? html` <button
+              id="streetViewButton"
+              @click=${this._showStreetView}
+              title="Show Street View"
+              aria-label="Show Street View">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="24px"
+                viewBox="0 0 24 24"
+                width="24px"
+                fill="currentColor">
+                <path
+                  d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+              </svg>
+            </button>`
+          : ''}
       </div>
       <div class="sidebar" role="complementary" aria-labelledby="chat-heading">
         <div class="selector" role="tablist" aria-label="Chat providers">
@@ -758,6 +821,19 @@ You can find this constant near the top of the map_app.ts file.`;
           </div>
         </div>
       </div>
+      ${this.isStreetViewVisible
+        ? html` <div id="streetViewModal" role="dialog" aria-modal="true">
+            <button
+              id="streetViewCloseButton"
+              @click=${this._hideStreetView}
+              aria-label="Close Street View">
+              &times;
+            </button>
+            <div
+              id="street-view-panorama"
+              aria-label="Google Street View Panorama"></div>
+          </div>`
+        : ''}
     </div>`;
   }
 }
